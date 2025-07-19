@@ -1,0 +1,104 @@
+.sidebar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 300px;
+  height: 100%;
+  background: inherit;
+  padding: 20px;
+  overflow-y: auto;
+  transition: transform 0.3s ease-in-out;
+  z-index: 100;
+  box-shadow: 2px 0 5px rgba(0, 0, 0, 0.2);
+}
+
+.sidebar.open {
+  transform: translateX(0);
+}
+
+.sidebar:not(.open) {
+  transform: translateX(-300px);
+}
+
+.sidebar-section {
+  margin-bottom: 20px;
+}
+
+.sidebar-section h3 {
+  font-size: 1.2rem;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sidebar-input {
+  width: 100%;
+  padding: 8px;
+  margin-bottom: 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: inherit;
+  color: inherit;
+}
+
+.sidebar-button {
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background 0.2s;
+}
+
+.sidebar-button:hover {
+  background: #0056b3;
+}
+
+.sidebar[style*="background: rgb(34, 34, 34)"] .sidebar-button {
+  background: #6f42c1;
+}
+
+.sidebar[style*="background: rgb(34, 34, 34)"] .sidebar-button:hover {
+  background: #5a32a3;
+}
+
+.sidebar-control {
+  margin-bottom: 15px;
+}
+
+.sidebar-control label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+
+.sidebar-control input[type="range"] {
+  width: 100%;
+}
+
+.sidebar-textarea {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: inherit;
+  color: inherit;
+  resize: vertical;
+}
+
+@media (max-width: 768px) {
+  .sidebar {
+    width: 250px;
+  }
+  .sidebar:not(.open) {
+    transform: translateX(-250px);
+  }
+}
