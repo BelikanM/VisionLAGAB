@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { FaFileUpload, FaPlay, FaRobot, FaSun, FaMoon, FaImage, FaVideo, FaStop, FaDownload, FaEye, FaEyeSlash, FaClipboard } from "react-icons/fa";
 
 function PointCloudViewer({ pointCloud, annotations }) {
+  console.log("PointCloudViewer rendu", { pointCloud, annotations });
   return (
     <group>
       <primitive object={pointCloud} dispose={null} />
@@ -53,7 +54,7 @@ function PointCloudEditor() {
 
   const addLog = (message) => {
     const timestamp = new Date().toLocaleTimeString();
-    setLogs((prev) => [...prev, `[${timestamp}] ${message}`].slice(-50)); // Limiter à 50 logs
+    setLogs((prev) => [...prev, `[${timestamp}] ${message}`].slice(-50));
     console.log(`[${timestamp}] ${message}`);
   };
 
@@ -77,11 +78,10 @@ function PointCloudEditor() {
 
     try {
       const endpoint = isImage ? "http://localhost:5000/upload_image" : "http://localhost:5000/upload";
-      const response = await fetch(endpoint, {
+      const response = await fetchWithRetry(endpoint, {
         method: "POST",
         body: formData,
       });
-
       if (!response.ok) {
         const errorData = await response.json();
         const errorMsg = `Erreur serveur : ${errorData.error || response.statusText}`;
@@ -99,6 +99,58 @@ function PointCloudEditor() {
       addLog(errorMsg);
       setIsLoading(false);
     }
+  }
+
+  async function fetchWithRetry(url, options, maxRetries = 3, timeout = 10000) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const controller = new AbortController();
+        const id = setTimeout(() => controller.abort(), timeout);
+        const response = await fetch(url, { ...options, signal: controller.signal });
+        clearTimeout(id);
+        return response;
+      } catch (err) {
+        addLog(`Échec de la requête (tentative ${attempt}) : ${err.message}`);
+        if (attempt === maxRetries) throw err;
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+  }
+
+  async function fetchAnnotationsWithRetry(maxRetries = 3, timeout = 10000) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await fetchWithRetry(
+          "http://localhost:5000/get_annotations",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          },
+          maxRetries,
+          timeout
+        );
+        const data = await response.json();
+        if (data.error) {
+          addLog(`Échec de la récupération des annotations (tentative ${attempt}) : ${data.error}`);
+          if (attempt === maxRetries) {
+            setErrorMessage(`Erreur lors de la récupération des annotations : ${data.error}`);
+            return [];
+          }
+        } else {
+          addLog(`Annotations reçues : ${data.annotations.length}`);
+          return data.annotations || [];
+        }
+      } catch (err) {
+        addLog(`Erreur réseau lors de la récupération des annotations (tentative ${attempt}) : ${err.message}`);
+        if (attempt === maxRetries) {
+          setErrorMessage(`Erreur lors de la récupération des annotations : ${err.message}`);
+          return [];
+        }
+      }
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    return [];
   }
 
   async function handlePlyResponse(response) {
@@ -160,29 +212,12 @@ function PointCloudEditor() {
 
         addLog(`Points parsés : ${positions.length}, couleurs : ${colors.length}`);
 
-        // Récupérer les annotations
-        try {
-          const annotationsResponse = await fetch("http://localhost:5000/get_annotations", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({}),
-          });
-          const annotationsData = await annotationsResponse.json();
-          if (annotationsData.error) {
-            const errorMsg = `Erreur lors de la récupération des annotations : ${annotationsData.error}`;
-            setErrorMessage(errorMsg);
-            addLog(errorMsg);
-          } else {
-            addLog(`Annotations reçues : ${annotationsData.annotations.length}`);
-            updatePointCloud({
-              positions,
-              colors,
-              annotations: annotationsData.annotations || [],
-            });
-          }
-        } catch (err) {
-          addLog(`Erreur lors de la requête des annotations : ${err.message}`);
-        }
+        const annotations = await fetchAnnotationsWithRetry();
+        updatePointCloud({
+          positions,
+          colors,
+          annotations,
+        });
       } else {
         const errorMsg = `Type de contenu inattendu : ${contentType}`;
         setErrorMessage(errorMsg);
@@ -209,6 +244,7 @@ function PointCloudEditor() {
       const geometry = new THREE.BufferGeometry();
       const positions = new Float32Array(data.positions.flat());
       geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+      addLog("Attribut de position défini");
 
       if (data.colors && data.colors.length === data.positions.length) {
         const colors = new Float32Array(data.colors.flat());
@@ -218,12 +254,14 @@ function PointCloudEditor() {
 
       geometry.computeVertexNormals();
       geometry.computeBoundingBox();
+      addLog("Géométrie normalisée et boîte englobante calculée");
 
       const material = new THREE.PointsMaterial({
         size: 0.01,
         vertexColors: data.colors && data.colors.length === data.positions.length ? true : false,
         color: data.colors ? null : "#ffffff",
       });
+      addLog("Matériau créé");
 
       const points = new THREE.Points(geometry, material);
       setPointCloud(points);
@@ -231,7 +269,6 @@ function PointCloudEditor() {
       setErrorMessage(data.annotations.length === 0 ? "Aucune anomalie détectée." : null);
       addLog(`Nuage de points rendu, annotations : ${data.annotations.length}`);
 
-      // Sauvegarder dans localStorage
       localStorage.setItem("pointCloudData", JSON.stringify({
         positions: data.positions,
         colors: data.colors,
@@ -249,7 +286,7 @@ function PointCloudEditor() {
     try {
       addLog("Tentative d'accès à la caméra arrière");
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment", width: 256, height: 192 },
+        video: { facingMode: "environment", width: 160, height: 120 }, // Réduit à 160x120
       });
       videoRef.current.srcObject = stream;
       videoRef.current.style.display = showVideo ? "block" : "none";
@@ -258,8 +295,8 @@ function PointCloudEditor() {
 
       streamIntervalRef.current = setInterval(async () => {
         const canvas = document.createElement("canvas");
-        canvas.width = videoRef.current.videoWidth || 256;
-        canvas.height = videoRef.current.videoHeight || 192;
+        canvas.width = videoRef.current.videoWidth || 160;
+        canvas.height = videoRef.current.videoHeight || 120;
         const ctx = canvas.getContext("2d");
         ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
 
@@ -270,7 +307,7 @@ function PointCloudEditor() {
           formData.append("file", blob, "frame.jpg");
 
           try {
-            const response = await fetch("http://localhost:5000/upload_image", {
+            const response = await fetchWithRetry("http://localhost:5000/upload_image", {
               method: "POST",
               body: formData,
             });
@@ -283,7 +320,7 @@ function PointCloudEditor() {
             setIsLoading(false);
           }
         }, "image/jpeg");
-      }, 500); // Intervalle de 500 ms
+      }, 2000); // Intervalle augmenté à 2000 ms
     } catch (err) {
       const errorMsg = `Erreur lors de l'accès à la caméra arrière : ${err.message}. Vérifiez les permissions et la disponibilité de la caméra.`;
       setErrorMessage(errorMsg);
@@ -341,7 +378,7 @@ function PointCloudEditor() {
       const commands = JSON.parse(scriptRef.current.value);
       if (!Array.isArray(commands)) throw new Error("Script doit être un tableau JSON.");
 
-      const response = await fetch("http://localhost:5000/run_script", {
+      const response = await fetchWithRetry("http://localhost:5000/run_script", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ commands, positions: pointCloud ? pointCloud.geometry.attributes.position.array : [] }),
@@ -374,7 +411,7 @@ function PointCloudEditor() {
       const script = JSON.parse(scriptRef.current.value);
       if (!script.actions) throw new Error("Script invalide");
 
-      const response = await fetch("http://localhost:5000/run_inference", {
+      const response = await fetchWithRetry("http://localhost:5000/run_inference", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ script, positions: pointCloud ? pointCloud.geometry.attributes.position.array : [] }),
